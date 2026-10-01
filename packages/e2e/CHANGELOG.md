@@ -1,5 +1,11 @@
 # e2e
 
+## 0.15.2
+
+### Patch Changes
+
+- [#708](https://github.com/tester-army/e2e/pull/708) [`4ee772c`](https://github.com/tester-army/e2e/commit/4ee772cc4ab800b1f2d4be4723bf28e2909b1edc) Thanks [@okwasniewski](https://github.com/okwasniewski)! - The package ships the documentation pages: coding agents can read them offline from `node_modules/e2e/docs`.
+
 ## 0.15.1
 
 ### Patch Changes
