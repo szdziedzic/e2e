@@ -389,6 +389,16 @@ describe('easSimulators()', () => {
     expect(eas.calls.at(-1)).toMatchObject({ operation: 'stop', session: 'session-secret' });
   });
 
+  it('keeps the login that started a session for a release that is tried again', async () => {
+    const provider = easSimulators({ projectId: 'p1' });
+    const lease = await provider.acquire(request({ env: home(homeWith(login)) }));
+    eas.errors.stop = { message: 'Internal server error', extensions: { errorCode: 'INTERNAL_SERVER_ERROR' } };
+    await expect(provider.release(lease, { ...releaseContext('run-retry'), env: home(emptyHome) })).rejects.toThrow('Internal server error');
+    delete eas.errors.stop;
+    await provider.release(lease, { ...releaseContext('run-retry'), env: home(emptyHome) });
+    expect(eas.calls.filter((call) => call.operation === 'stop').map((call) => call.session)).toEqual(['session-secret', 'session-secret']);
+  });
+
   it('names an eas-cli state file that is not JSON', async () => {
     const brokenHome = homeWith('{ "auth": "session-secret');
     await expect(easSimulators({ projectId: 'p1' }).acquire(request({ env: home(brokenHome) }))).rejects.toThrow(

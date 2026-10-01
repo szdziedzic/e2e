@@ -189,6 +189,8 @@ Without the indicator, stopping takes about two seconds.
 - Rides out up to three failed status polls in a row, a blip at
   api.expo.dev, before giving a session up.
 
-No `EXPO_TOKEN` and no eas-cli login, an account without EAS Simulators, or a
-session that fails to start fails the lease with EAS's message. That ends the run before
-any test, and the run's other sessions, started or queued, are still stopped.
+No `EXPO_TOKEN` and no eas-cli login fails the lease before any request to
+EAS, with a message to run `eas login` or set `EXPO_TOKEN`. An account without
+EAS Simulators, or a session that fails to start, fails the lease with EAS's
+message. Either ends the run before any test, and the run's other sessions,
+started or queued, are still stopped.

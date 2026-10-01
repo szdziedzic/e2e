@@ -164,8 +164,8 @@ export function easSimulators(options: EasSimulatorsOptions): DeviceProvider {
       held?.delete(lease.id);
       if (held?.size === 0) idleDeadlines.delete(context.runId);
       const client = leaseClients.get(lease.id) ?? (await clientFor(context.env));
-      leaseClients.delete(lease.id);
       await client.stop(lease.id, context.signal);
+      leaseClients.delete(lease.id);
     },
   };
 }
