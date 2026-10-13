@@ -67,7 +67,6 @@ interface RestSession {
   /** The session's page on expo.dev. */
   readonly url: string;
   readonly status: 'new' | 'queued' | 'starting' | 'in-progress' | 'stopped' | 'errored';
-  readonly jobRunStatus: string | null;
   readonly remoteConfig: {
     readonly agentDeviceRemoteSessionUrl?: string;
     readonly agentDeviceRemoteSessionToken?: string;
@@ -75,11 +74,6 @@ interface RestSession {
     readonly webPreviewToken?: string | null;
   } | null;
 }
-
-/** Job run states before the job picks the session up: waiting for the account's concurrency. */
-const QUEUED_JOB = new Set(['new', 'in-queue']);
-/** Job run states after which the session never becomes ready. */
-const ENDED_JOB = new Set(['errored', 'canceled', 'finished', 'pending-cancel']);
 
 /** EAS Simulators sessions for one Expo access token or eas-cli session. */
 export function easSessions(credentials: ExpoCredentials): EasSessions {
@@ -114,16 +108,15 @@ export function easSessions(credentials: ExpoCredentials): EasSessions {
     },
     async state(id, signal) {
       const session = await rest<RestSession>('GET', sessionPath(id), undefined, signal);
-      const job = session.jobRunStatus ?? undefined;
       const config = session.remoteConfig;
+      // EAS ends the session when its job ends; an ended session keeps a daemon address that no longer answers.
       if (session.status === 'stopped' || session.status === 'errored') return { phase: 'ended', status: session.status };
-      // A job that ended keeps the daemon address it had, which no longer answers.
-      if (job !== undefined && ENDED_JOB.has(job)) return { phase: 'ended', status: `job ${job}` };
       if (config?.agentDeviceRemoteSessionUrl !== undefined && config.agentDeviceRemoteSessionToken !== undefined) {
         const openPreviewUrl = config.webPreviewToken == null ? (config.webPreviewUrl ?? undefined) : undefined;
         return { phase: 'ready', daemonUrl: config.agentDeviceRemoteSessionUrl, daemonToken: config.agentDeviceRemoteSessionToken, openPreviewUrl };
       }
-      return { phase: job === undefined || QUEUED_JOB.has(job) ? 'queued' : 'starting' };
+      // `new` until the job enters the queue, `queued` while it waits for the account's concurrency.
+      return { phase: session.status === 'new' || session.status === 'queued' ? 'queued' : 'starting' };
     },
     async stop(id, signal) {
       // EAS cancels the session's job too when it is still queued.

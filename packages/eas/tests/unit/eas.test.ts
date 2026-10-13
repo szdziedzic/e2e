@@ -31,7 +31,6 @@ interface Call {
 
 const READY = {
   status: 'in-progress',
-  jobRunStatus: 'in-progress',
   remoteConfig: {
     agentDeviceRemoteSessionUrl: 'https://agent-device-s1.eas-simulator.ngrok.dev',
     agentDeviceRemoteSessionToken: 'daemon-token',
@@ -73,8 +72,8 @@ beforeEach(() => {
       eas.stateOutages -= 1;
       return new Response('Bad gateway', { status: 502 });
     }
-    if (operation === 'create') return Response.json({ data: { id: 's1', url: SESSION_URL, status: 'new', jobRunStatus: 'new', remoteConfig: null } });
-    if (operation === 'stop') return Response.json({ data: { id: 's1', url: SESSION_URL, status: 'stopped', jobRunStatus: 'pending-cancel', remoteConfig: null } });
+    if (operation === 'create') return Response.json({ data: { id: 's1', url: SESSION_URL, status: 'new', remoteConfig: null } });
+    if (operation === 'stop') return Response.json({ data: { id: 's1', url: SESSION_URL, status: 'stopped', remoteConfig: null } });
     eas.onState?.();
     const next = eas.states.length > 1 ? eas.states.shift() : eas.states[0];
     return Response.json({ data: next });
@@ -205,7 +204,7 @@ describe('easSimulators()', () => {
   });
 
   it('leases a session whose queue was brief without a queue line', async () => {
-    eas.states = [{ status: 'new', jobRunStatus: 'new', remoteConfig: null }, { status: 'new', jobRunStatus: 'in-progress', remoteConfig: null }, READY];
+    eas.states = [{ status: 'new', remoteConfig: null }, { status: 'starting', remoteConfig: null }, READY];
     const req = request();
     await easSimulators({ projectId: 'p1' }).acquire(req);
     expect(req.lines).toEqual([`simulator session s1, ${SESSION_URL}`, 'watch at https://expo.dev/simulator-preview/s1']);
@@ -221,8 +220,8 @@ describe('easSimulators()', () => {
   it('polls until the daemon is reachable and leases it, saying once that it has waited in the queue for two minutes', async () => {
     let now = 0;
     vi.spyOn(Date, 'now').mockImplementation(() => (now += 50_000));
-    const queued = { status: 'new', jobRunStatus: 'in-queue', remoteConfig: null };
-    eas.states = [queued, queued, queued, queued, { status: 'new', jobRunStatus: 'in-progress', remoteConfig: null }, READY];
+    const queued = { status: 'queued', remoteConfig: null };
+    eas.states = [queued, queued, queued, queued, { status: 'starting', remoteConfig: null }, READY];
     const req = request();
     const lease = await easSimulators({ projectId: 'p1' }).acquire(req);
     expect(lease).toEqual({ id: 's1', daemon: { baseUrl: 'https://agent-device-s1.eas-simulator.ngrok.dev', authToken: 'daemon-token' } });
@@ -257,13 +256,12 @@ describe('easSimulators()', () => {
   });
 
   it('stops a session that ends before it is ready, and names it', async () => {
-    eas.states = [{ status: 'new', jobRunStatus: 'errored', remoteConfig: null }];
-    await expect(easSimulators({ projectId: 'p1' }).acquire(request())).rejects.toThrow(`simulator session s1 did not become ready: session job errored; stopped it, ${SESSION_URL}`);
+    eas.states = [{ status: 'errored', remoteConfig: null }];
+    await expect(easSimulators({ projectId: 'p1' }).acquire(request())).rejects.toThrow(`simulator session s1 did not become ready: session errored; stopped it, ${SESSION_URL}`);
     expect(eas.calls.at(-1)?.operation).toBe('stop');
-    eas.states = [{ ...READY, jobRunStatus: 'finished' }];
-    await expect(easSimulators({ projectId: 'p1' }).acquire(request())).rejects.toThrow('did not become ready: session job finished; stopped it');
-    eas.states = [{ status: 'errored', jobRunStatus: null, remoteConfig: null }];
-    await expect(easSimulators({ projectId: 'p1' }).acquire(request())).rejects.toThrow('did not become ready: session errored; stopped it');
+    // A session that ended keeps the daemon address it had, which no longer answers.
+    eas.states = [{ ...READY, status: 'stopped' }];
+    await expect(easSimulators({ projectId: 'p1' }).acquire(request())).rejects.toThrow('did not become ready: session stopped; stopped it');
   });
 
   it('starts no session for an already cancelled request', async () => {
@@ -283,7 +281,7 @@ describe('easSimulators()', () => {
 
   it('stops a session whose request was cancelled while it started, and says when stopping failed too', async () => {
     const controller = new AbortController();
-    eas.states = [{ status: 'new', jobRunStatus: 'in-queue', remoteConfig: null }];
+    eas.states = [{ status: 'queued', remoteConfig: null }];
     eas.onState = () => controller.abort();
     eas.errors.stop = { message: 'Service unavailable', code: 'INTERNAL_SERVER_ERROR' };
     await expect(easSimulators({ projectId: 'p1' }).acquire(request({ signal: controller.signal }))).rejects.toThrow(
@@ -298,7 +296,7 @@ describe('easSimulators()', () => {
     const ios = request({ runId: 'run-idle' });
     const iosProvider = easSimulators({ projectId: 'p1', maxIdleTimeMinutes: 5 });
     const lease = await iosProvider.acquire(ios);
-    eas.states = [{ status: 'new', jobRunStatus: 'in-queue', remoteConfig: null }];
+    eas.states = [{ status: 'queued', remoteConfig: null }];
     await expect(easSimulators({ projectId: 'p1', maxIdleTimeMinutes: 5 }).acquire(request({ runId: 'run-idle', platform: 'android', targetName: 'android', slots: 1 }))).rejects.toThrow(
       'simulator session s1 did not become ready: still queued while another session of this run idled to its `maxIdleTimeMinutes`, where EAS stops it; lower `workers` or raise `maxIdleTimeMinutes`; stopped it',
     );
@@ -311,7 +309,7 @@ describe('easSimulators()', () => {
     vi.spyOn(Date, 'now').mockImplementation(() => (now += 60_000));
     const patient = easSimulators({ projectId: 'p1', maxIdleTimeMinutes: 30 });
     const lease = await patient.acquire(request({ runId: 'run-limits' }));
-    const queued = { status: 'new', jobRunStatus: 'in-queue', remoteConfig: null };
+    const queued = { status: 'queued', remoteConfig: null };
     eas.states = [...Array.from({ length: 10 }, () => queued), READY];
     await expect(easSimulators({ projectId: 'p1', maxIdleTimeMinutes: 2 }).acquire(request({ runId: 'run-limits' }))).resolves.toMatchObject({ id: 's1' });
     await patient.release(lease, releaseContext('run-limits'));
@@ -320,7 +318,7 @@ describe('easSimulators()', () => {
   it('keeps waiting however long it queues while no session of the run is ready, or after they were released', async () => {
     let now = 0;
     vi.spyOn(Date, 'now').mockImplementation(() => (now += 60_000));
-    const queued = { status: 'new', jobRunStatus: 'in-queue', remoteConfig: null };
+    const queued = { status: 'queued', remoteConfig: null };
     eas.states = [...Array.from({ length: 20 }, () => queued), READY];
     await expect(easSimulators({ projectId: 'p1', maxIdleTimeMinutes: 5 }).acquire(request())).resolves.toMatchObject({ id: 's1' });
     const provider = easSimulators({ projectId: 'p1', maxIdleTimeMinutes: 5 });
@@ -345,7 +343,7 @@ describe('easSimulators()', () => {
   it('gives up on a session that boots for fifteen minutes after leaving the queue', async () => {
     let now = 0;
     vi.spyOn(Date, 'now').mockImplementation(() => (now += 60_000));
-    eas.states = [{ status: 'new', jobRunStatus: 'in-queue', remoteConfig: null }, { status: 'new', jobRunStatus: 'in-progress', remoteConfig: null }];
+    eas.states = [{ status: 'queued', remoteConfig: null }, { status: 'starting', remoteConfig: null }];
     await expect(easSimulators({ projectId: 'p1' }).acquire(request())).rejects.toThrow('did not become ready: still starting after 15 minutes; stopped it');
   });
 
